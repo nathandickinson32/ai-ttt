@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tic-Tac-Zoo — Python in the Browser</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background: linear-gradient(160deg, #e8c87a 0%, #d4a853 30%, #a8c686 70%, #7ba05b 100%);
+      color: #3b2f1e;
+    }
+
+    h1 {
+      margin-bottom: 0.15em;
+      font-size: 1.8em;
+      color: #3b2f1e;
+    }
+
+    #subtitle {
+      font-size: 0.95em;
+      color: #5c4a2e;
+      margin-bottom: 0.5em;
+    }
+
+    #loading {
+      margin: 2em 0;
+      font-style: italic;
+      color: #6b5a3e;
+    }
+
+    #game-container { display: none; text-align: center; }
+
+    /* --- Token selector --- */
+    #token-selector {
+      margin: 0.5em 0 0.25em;
+      display: flex;
+      gap: 0.4em;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #token-selector .label {
+      font-size: 0.85em;
+      font-weight: 600;
+      color: #5c4a2e;
+      margin-right: 0.3em;
+    }
+
+    #token-selector button {
+      width: 40px;
+      height: 40px;
+      border: 2px solid #b89a5a;
+      border-radius: 8px;
+      background: #faf3e0;
+      cursor: pointer;
+      font-size: 1.3em;
+      transition: background 0.15s, border-color 0.15s, transform 0.1s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #token-selector button.active {
+      background: #d4a853;
+      border-color: #8b6914;
+      transform: scale(1.1);
+    }
+
+    #token-selector button:hover:not(.active) {
+      background: #f0e0b8;
+    }
+
+    /* --- Difficulty selector --- */
+    #difficulty-selector {
+      margin: 0.5em 0 0.75em;
+      display: flex;
+      gap: 0.5em;
+      justify-content: center;
+    }
+
+    #difficulty-selector button {
+      padding: 0.4em 1.1em;
+      border: 2px solid #8b6914;
+      border-radius: 8px;
+      background: #faf3e0;
+      cursor: pointer;
+      font-size: 0.95em;
+      transition: background 0.15s, color 0.15s;
+      color: #3b2f1e;
+    }
+
+    #difficulty-selector button.active {
+      background: #8b6914;
+      color: #faf3e0;
+    }
+
+    #difficulty-selector button:hover:not(.active) {
+      background: #f0e0b8;
+    }
+
+    /* --- Board --- */
+    #board {
+      display: grid;
+      grid-template-columns: repeat(3, 100px);
+      grid-template-rows: repeat(3, 100px);
+      gap: 5px;
+      margin: 0 auto;
+    }
+
+    .cell {
+      width: 100px;
+      height: 100px;
+      background: #faf3e0;
+      border: 2px solid #b89a5a;
+      border-radius: 10px;
+      font-size: 2.4em;
+      cursor: pointer;
+      transition: background 0.12s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+    }
+
+    .cell:hover { background: #f5e8c8; }
+    .cell.win { background: #b8e6a0; }
+
+    /* --- Status & reset --- */
+    #status {
+      margin: 0.75em 0 0.5em;
+      font-size: 1.15em;
+      min-height: 1.5em;
+      font-weight: 600;
+      color: #3b2f1e;
+    }
+
+    #reset-btn {
+      padding: 0.5em 1.6em;
+      border: none;
+      border-radius: 8px;
+      background: #8b6914;
+      color: #faf3e0;
+      font-size: 1em;
+      cursor: pointer;
+      margin-top: 0.25em;
+      transition: background 0.15s;
+    }
+
+    #reset-btn:hover { background: #a07b1a; }
+  </style>
+</head>
+<body>
+
+<h1>🌴 Tic-Tac-Zoo 🌱</h1>
+<p id="subtitle">Pick your animal and challenge the zoo!</p>
+<p id="loading">Loading Python runtime (Pyodide)&hellip;</p>
+
+<div id="game-container">
+  <div id="token-selector">
+    <span class="label">Your animal:</span>
+    <button data-token="🐶" class="active">🐶</button>
+    <button data-token="🐱">🐱</button>
+    <button data-token="🐵">🐵</button>
+    <button data-token="🐼">🐼</button>
+    <button data-token="🐧">🐧</button>
+  </div>
+
+  <div id="difficulty-selector">
+    <button data-level="easy">🐰 Bunny</button>
+    <button data-level="medium" class="active">🦊 Fox</button>
+    <button data-level="hard">🦁 Lion</button>
+  </div>
+
+  <div id="board"></div>
+  <div id="status">Your turn</div>
+  <button id="reset-btn">New Game</button>
+</div>
+
+<!-- Pyodide CDN -->
+<script src="https://cdn.jsdelivr.net/pyodide/v0.27.5/full/pyodide.js"></script>
+
+<script>
+// ---------- Python source (game logic + AI) ----------
+const pythonSource = `
+import random
+
+WIN_COMBOS = [
+    [0, 1, 2], [3, 4, 5], [6, 7, 8],
+    [0, 3, 6], [1, 4, 7], [2, 5, 8],
+    [0, 4, 8], [2, 4, 6],
+]
+
+board = [""] * 9
+game_over = False
+difficulty = "medium"
+
+player_token = "🐶"
+ai_tokens = {
+    "easy":   "🐰",
+    "medium": "🦊",
+    "hard":   "🦁",
+}
+
+def ai_token():
+    return ai_tokens.get(difficulty, "\U0001f98a")
+
+def reset():
+    global board, game_over
+    board = [""] * 9
+    game_over = False
+
+def available_moves(b):
+    return [i for i in range(9) if b[i] == ""]
+
+def check_winner(b):
+    for combo in WIN_COMBOS:
+        a, c, e = combo
+        if b[a] and b[a] == b[c] == b[e]:
+            return b[a]
+    return None
+
+def is_draw(b):
+    return all(cell != "" for cell in b) and check_winner(b) is None
+
+def winning_cells(b):
+    for combo in WIN_COMBOS:
+        a, c, e = combo
+        if b[a] and b[a] == b[c] == b[e]:
+            return combo
+    return []
+
+def minimax(b, depth, is_maximising):
+    winner = check_winner(b)
+    if winner == "O":
+        return 10 - depth
+    if winner == "X":
+        return depth - 10
+    if is_draw(b):
+        return 0
+
+    if is_maximising:
+        best = -100
+        for move in available_moves(b):
+            b[move] = "O"
+            score = minimax(b, depth + 1, False)
+            b[move] = ""
+            best = max(best, score)
+        return best
+    else:
+        best = 100
+        for move in available_moves(b):
+            b[move] = "X"
+            score = minimax(b, depth + 1, True)
+            b[move] = ""
+            best = min(best, score)
+        return best
+
+def best_move_minimax(b):
+    best_score = -100
+    move = None
+    for i in available_moves(b):
+        b[i] = "O"
+        score = minimax(b, 0, False)
+        b[i] = ""
+        if score > best_score:
+            best_score = score
+            move = i
+    return move
+
+def ai_move():
+    global board, game_over
+    moves = available_moves(board)
+    if not moves or game_over:
+        return -1
+
+    if difficulty == "easy":
+        choice = random.choice(moves)
+    elif difficulty == "medium":
+        if random.random() < 0.6:
+            choice = best_move_minimax(board)
+        else:
+            choice = random.choice(moves)
+    else:
+        choice = best_move_minimax(board)
+
+    board[choice] = "O"
+    return choice
+
+def human_move(index):
+    global board, game_over
+
+    if game_over or board[index] != "":
+        return {"ok": False}
+
+    board[index] = "X"
+
+    base = {
+        "player_token": player_token,
+        "ai_token": ai_token(),
+    }
+
+    if check_winner(board) == "X":
+        game_over = True
+        return {**base, "ok": True, "ai_cell": -1, "status": "win_x", "win_cells": winning_cells(board)}
+    if is_draw(board):
+        game_over = True
+        return {**base, "ok": True, "ai_cell": -1, "status": "draw", "win_cells": []}
+
+    ai_cell = ai_move()
+
+    if check_winner(board) == "O":
+        game_over = True
+        return {**base, "ok": True, "ai_cell": ai_cell, "status": "win_o", "win_cells": winning_cells(board)}
+    if is_draw(board):
+        game_over = True
+        return {**base, "ok": True, "ai_cell": ai_cell, "status": "draw", "win_cells": []}
+
+    return {**base, "ok": True, "ai_cell": ai_cell, "status": "play", "win_cells": []}
+`;
+
+// ---------- Zoo theme config ----------
+const AI_NAMES = { easy: "\ud83d\udc30 Bunny", medium: "\ud83e\udd8a Fox", hard: "\ud83e\udd81 Lion" };
+let currentPlayerToken = "\ud83d\udc36";
+let currentDifficulty = "medium";
+let gameStarted = false;
+
+// ---------- Boot Pyodide, then hand control to the UI ----------
+let pyodide = null;
+
+async function boot() {
+  pyodide = await loadPyodide();
+  pyodide.runPython(pythonSource);
+
+  document.getElementById("loading").style.display = "none";
+  document.getElementById("game-container").style.display = "block";
+  buildBoard();
+}
+
+// ---------- UI helpers ----------
+function buildBoard() {
+  const boardEl = document.getElementById("board");
+  boardEl.innerHTML = "";
+  for (let i = 0; i < 9; i++) {
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    cell.dataset.index = i;
+    cell.addEventListener("click", onCellClick);
+    boardEl.appendChild(cell);
+  }
+}
+
+function setStatus(text) {
+  document.getElementById("status").textContent = text;
+}
+
+function setTokenSelectorEnabled(enabled) {
+  document.querySelectorAll("#token-selector button").forEach(btn => {
+    btn.disabled = !enabled;
+    btn.style.opacity = enabled ? "1" : "0.4";
+    btn.style.cursor = enabled ? "pointer" : "not-allowed";
+  });
+}
+
+function getAiToken() {
+  const tok = pyodide.globals.get("ai_token")();
+  return tok;
+}
+
+function renderResult(result) {
+  if (!result.ok) return;
+
+  const cells = document.querySelectorAll(".cell");
+  const aiEmoji = result.ai_token || getAiToken();
+
+  // Show AI move
+  if (result.ai_cell >= 0) {
+    cells[result.ai_cell].textContent = aiEmoji;
+  }
+
+  // Highlight winning line
+  if (result.win_cells && result.win_cells.length) {
+    for (const idx of result.win_cells) {
+      cells[idx].classList.add("win");
+    }
+  }
+
+  // Status text
+  const aiName = AI_NAMES[currentDifficulty] || "AI";
+  switch (result.status) {
+    case "win_x": setStatus("You win! \ud83c\udf89"); break;
+    case "win_o": setStatus(aiName + " wins!"); break;
+    case "draw":  setStatus("It's a draw!"); break;
+    default:      setStatus("Your turn");
+  }
+}
+
+// ---------- Event handlers ----------
+function onCellClick(e) {
+  const idx = Number(e.currentTarget.dataset.index);
+
+  const proxy = pyodide.globals.get("human_move")(idx);
+  const result = Object.fromEntries(proxy.toJs());
+  proxy.destroy();
+
+  if (!result.ok) return;
+
+  if (!gameStarted) {
+    gameStarted = true;
+    setTokenSelectorEnabled(false);
+  }
+
+  // Show the human move with selected emoji
+  const cells = document.querySelectorAll(".cell");
+  cells[idx].textContent = currentPlayerToken;
+
+  // Convert win_cells proxy if present
+  if (result.win_cells && typeof result.win_cells.toJs === "function") {
+    result.win_cells = Array.from(result.win_cells.toJs());
+  } else if (result.win_cells instanceof Map) {
+    result.win_cells = Array.from(result.win_cells.values());
+  }
+
+  renderResult(result);
+}
+
+// Reset button
+document.getElementById("reset-btn").addEventListener("click", () => {
+  pyodide.runPython("reset()");
+  buildBoard();
+  setStatus("Your turn");
+  gameStarted = false;
+  setTokenSelectorEnabled(true);
+});
+
+// Difficulty buttons
+document.querySelectorAll("#difficulty-selector button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#difficulty-selector button")
+      .forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentDifficulty = btn.dataset.level;
+    pyodide.runPython(`difficulty = "${btn.dataset.level}"`);
+    pyodide.runPython("reset()");
+    buildBoard();
+    setStatus("Your turn");
+    gameStarted = false;
+    setTokenSelectorEnabled(true);
+  });
+});
+
+// Token selector buttons
+document.querySelectorAll("#token-selector button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    if (gameStarted) return;
+    document.querySelectorAll("#token-selector button")
+      .forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentPlayerToken = btn.dataset.token;
+    pyodide.runPython(`player_token = "${btn.dataset.token}"`);
+  });
+});
+
+// Kick everything off.
+boot();
+</script>
+</body>
+</html>
